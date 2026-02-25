@@ -1,5 +1,86 @@
 'use strict';
 
+// ===== Dark Mode (apply immediately to prevent FOUC) =====
+const THEME_KEY = 'meishi_theme';
+
+function getTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved) return saved;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem(THEME_KEY, theme);
+}
+
+applyTheme(getTheme());
+
+// ===== IndexedDB =====
+const DB_NAME = 'meishi_db';
+const DB_VERSION = 1;
+const PHOTO_STORE = 'photos';
+let db = null;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const database = e.target.result;
+      if (!database.objectStoreNames.contains(PHOTO_STORE)) {
+        database.createObjectStore(PHOTO_STORE);
+      }
+    };
+    req.onsuccess = (e) => { db = e.target.result; resolve(db); };
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+function savePhotoDB(id, blob) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).put(blob, id);
+    tx.oncomplete = resolve;
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+function getPhotoDB(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readonly');
+    const req = tx.objectStore(PHOTO_STORE).get(id);
+    req.onsuccess = (e) => resolve(e.target.result || null);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+function deletePhotoDB(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).delete(id);
+    tx.oncomplete = resolve;
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+// ===== Photo URL Cache =====
+// Map<cardId, objectURL> — persists across re-renders
+const photoUrlCache = new Map();
+
+function revokePhotoUrl(id) {
+  const url = photoUrlCache.get(id);
+  if (url) { URL.revokeObjectURL(url); photoUrlCache.delete(id); }
+}
+
+async function getPhotoUrl(id) {
+  if (photoUrlCache.has(id)) return photoUrlCache.get(id);
+  const blob = await getPhotoDB(id);
+  if (!blob) return null;
+  const url = URL.createObjectURL(blob);
+  photoUrlCache.set(id, url);
+  return url;
+}
+
 // ===== Storage =====
 const STORE_KEY = 'meishi_cards';
 
@@ -19,10 +100,31 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// ===== Migration: base64 photos → IndexedDB =====
+async function migratePhotos() {
+  let changed = false;
+  for (const card of cards) {
+    if (card.photo && card.photo.startsWith('data:')) {
+      try {
+        const res = await fetch(card.photo);
+        const blob = await res.blob();
+        await savePhotoDB(card.id, blob);
+        card.hasPhoto = true;
+        delete card.photo;
+        changed = true;
+      } catch {
+        // Migration failed for this card; leave as-is
+      }
+    }
+  }
+  if (changed) saveCards(cards);
+}
+
 // ===== State =====
 let cards = loadCards();
 let searchQuery = '';
 let currentDetailId = null;
+let sortBy = 'createdAt'; // 'createdAt' | 'name' | 'company'
 
 // ===== DOM refs =====
 const $ = (id) => document.getElementById(id);
@@ -32,9 +134,13 @@ const emptyState = $('empty-state');
 // Header
 const btnAdd          = $('btn-add');
 const btnSearchToggle = $('btn-search-toggle');
+const btnTheme        = $('btn-theme');
 const searchBar       = $('search-bar');
 const searchInput     = $('search-input');
 const fab             = $('fab');
+
+// Sort chips
+const sortChips = document.querySelectorAll('.sort-chip');
 
 // Add/Edit modal
 const modalOverlay  = $('modal-overlay');
@@ -72,12 +178,20 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-function renderAvatar(card, size = 'small') {
-  const cls = size === 'large' ? 'detail-avatar' : 'card-avatar';
-  if (card.photo) {
-    return `<div class="${cls}"><img src="${escHtml(card.photo)}" alt="${escHtml(card.name)}" /></div>`;
+// Render avatar with initials; photo is loaded async separately
+function renderAvatarHtml(card, cls) {
+  return `<div class="${cls}" data-id="${escHtml(card.id)}">${escHtml(getInitials(card.name))}</div>`;
+}
+
+async function loadAvatarPhoto(el, card) {
+  if (!card.hasPhoto || !el) return;
+  try {
+    const url = await getPhotoUrl(card.id);
+    if (!url || !el.isConnected) return;
+    el.innerHTML = `<img src="${url}" alt="${escHtml(card.name)}" />`;
+  } catch {
+    // Silently fail — initials remain
   }
-  return `<div class="${cls}">${escHtml(getInitials(card.name))}</div>`;
 }
 
 function renderCardItem(card) {
@@ -93,7 +207,7 @@ function renderCardItem(card) {
     .join('');
 
   li.innerHTML = `
-    ${renderAvatar(card)}
+    ${renderAvatarHtml(card, 'card-avatar')}
     <div class="card-body">
       ${card.furigana ? `<div class="card-furigana">${escHtml(card.furigana)}</div>` : ''}
       <div class="card-name">${escHtml(card.name)}</div>
@@ -102,6 +216,10 @@ function renderCardItem(card) {
       ${tags ? `<div class="card-tags">${tags}</div>` : ''}
     </div>
   `;
+
+  if (card.hasPhoto) {
+    loadAvatarPhoto(li.querySelector('.card-avatar'), card);
+  }
 
   li.addEventListener('click', () => openDetail(card.id));
   li.addEventListener('keydown', (e) => {
@@ -124,8 +242,25 @@ function filteredCards() {
   );
 }
 
+function sortedCards(list) {
+  if (sortBy === 'name') {
+    return list.sort((a, b) => {
+      const fa = a.furigana || a.name || '';
+      const fb = b.furigana || b.name || '';
+      return fa.localeCompare(fb, 'ja');
+    });
+  }
+  if (sortBy === 'company') {
+    return list.sort((a, b) =>
+      (a.company || '').localeCompare(b.company || '', 'ja')
+    );
+  }
+  // createdAt: newest first
+  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+}
+
 function renderList() {
-  const list = filteredCards();
+  const list = sortedCards(filteredCards());
   cardList.innerHTML = '';
 
   if (list.length === 0) {
@@ -139,23 +274,42 @@ function renderList() {
   }
 }
 
+// ===== Sort =====
+sortChips.forEach((chip) => {
+  chip.addEventListener('click', () => {
+    sortChips.forEach((c) => c.classList.remove('active'));
+    chip.classList.add('active');
+    sortBy = chip.dataset.sort;
+    renderList();
+  });
+});
+
 // ===== Add / Edit Modal =====
-let photoDataUrl = null;
+let pendingPhotoBlob = null;
+let pendingPhotoPreviewUrl = null;
+
+function clearPendingPhoto() {
+  if (pendingPhotoPreviewUrl) {
+    URL.revokeObjectURL(pendingPhotoPreviewUrl);
+    pendingPhotoPreviewUrl = null;
+  }
+  pendingPhotoBlob = null;
+}
 
 function openAddModal() {
   modalTitle.textContent = '名刺を追加';
   cardForm.reset();
   $('form-id').value = '';
-  photoDataUrl = null;
+  clearPendingPhoto();
   photoPreview.innerHTML = '<span class="photo-placeholder">👤</span>';
   clearErrors();
   modalOverlay.classList.remove('hidden');
   setTimeout(() => $('form-name').focus(), 50);
 }
 
-function openEditModal(card) {
+async function openEditModal(card) {
   modalTitle.textContent = '名刺を編集';
-  $('form-id').value    = card.id;
+  $('form-id').value        = card.id;
   $('form-name').value      = card.name || '';
   $('form-furigana').value  = card.furigana || '';
   $('form-company').value   = card.company || '';
@@ -169,18 +323,29 @@ function openEditModal(card) {
   $('form-tags').value      = (card.tags || []).join(', ');
   $('form-notes').value     = card.notes || '';
 
-  photoDataUrl = card.photo || null;
-  photoPreview.innerHTML = card.photo
-    ? `<img src="${escHtml(card.photo)}" alt="写真" />`
-    : '<span class="photo-placeholder">👤</span>';
+  clearPendingPhoto();
+  photoPreview.innerHTML = '<span class="photo-placeholder">👤</span>';
 
   clearErrors();
   modalOverlay.classList.remove('hidden');
   setTimeout(() => $('form-name').focus(), 50);
+
+  // Load existing photo asynchronously
+  if (card.hasPhoto) {
+    try {
+      const url = await getPhotoUrl(card.id);
+      if (url && modalOverlay.classList.contains('hidden') === false) {
+        photoPreview.innerHTML = `<img src="${url}" alt="写真" />`;
+      }
+    } catch {
+      // Leave placeholder
+    }
+  }
 }
 
 function closeAddModal() {
   modalOverlay.classList.add('hidden');
+  clearPendingPhoto();
 }
 
 function clearErrors() {
@@ -189,17 +354,15 @@ function clearErrors() {
 }
 
 function validateForm() {
-  let ok = true;
   const name = $('form-name').value.trim();
   if (!name) {
     $('err-name').textContent = '氏名は必須です';
     $('form-name').classList.add('invalid');
-    ok = false;
-  } else {
-    $('err-name').textContent = '';
-    $('form-name').classList.remove('invalid');
+    return false;
   }
-  return ok;
+  $('err-name').textContent = '';
+  $('form-name').classList.remove('invalid');
+  return true;
 }
 
 function collectForm() {
@@ -221,11 +384,10 @@ function collectForm() {
     website:    $('form-website').value.trim(),
     tags,
     notes:      $('form-notes').value.trim(),
-    photo:      photoDataUrl || null,
   };
 }
 
-cardForm.addEventListener('submit', (e) => {
+cardForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!validateForm()) return;
 
@@ -236,12 +398,24 @@ cardForm.addEventListener('submit', (e) => {
     // Edit
     const idx = cards.findIndex((c) => c.id === id);
     if (idx !== -1) {
-      cards[idx] = { ...cards[idx], ...data, updatedAt: new Date().toISOString() };
+      let hasPhoto = cards[idx].hasPhoto || false;
+      if (pendingPhotoBlob) {
+        await savePhotoDB(id, pendingPhotoBlob);
+        revokePhotoUrl(id); // Invalidate cached URL
+        hasPhoto = true;
+      }
+      cards[idx] = { ...cards[idx], ...data, hasPhoto, updatedAt: new Date().toISOString() };
     }
     showToast('名刺を更新しました');
   } else {
     // Add
-    cards.push({ id: generateId(), ...data, createdAt: new Date().toISOString() });
+    const newId = generateId();
+    let hasPhoto = false;
+    if (pendingPhotoBlob) {
+      await savePhotoDB(newId, pendingPhotoBlob);
+      hasPhoto = true;
+    }
+    cards.push({ id: newId, ...data, hasPhoto, createdAt: new Date().toISOString() });
     showToast('名刺を追加しました');
   }
 
@@ -254,12 +428,10 @@ cardForm.addEventListener('submit', (e) => {
 formPhoto.addEventListener('change', () => {
   const file = formPhoto.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    photoDataUrl = reader.result;
-    photoPreview.innerHTML = `<img src="${escHtml(reader.result)}" alt="写真" />`;
-  };
-  reader.readAsDataURL(file);
+  clearPendingPhoto();
+  pendingPhotoBlob = file;
+  pendingPhotoPreviewUrl = URL.createObjectURL(file);
+  photoPreview.innerHTML = `<img src="${pendingPhotoPreviewUrl}" alt="写真" />`;
 });
 photoPreview.addEventListener('click', () => formPhoto.click());
 
@@ -279,7 +451,7 @@ function detailField(icon, label, value, link = null) {
     </div>`;
 }
 
-function openDetail(id) {
+async function openDetail(id) {
   const card = cards.find((c) => c.id === id);
   if (!card) return;
   currentDetailId = id;
@@ -292,7 +464,7 @@ function openDetail(id) {
 
   detailContent.innerHTML = `
     <div class="detail-avatar-wrap">
-      ${renderAvatar(card, 'large')}
+      ${renderAvatarHtml(card, 'detail-avatar')}
       <div class="detail-name">${escHtml(card.name)}</div>
       ${card.furigana ? `<div class="detail-furigana">${escHtml(card.furigana)}</div>` : ''}
       ${companyLine ? `<div class="detail-company">${escHtml(companyLine)}</div>` : ''}
@@ -315,6 +487,10 @@ function openDetail(id) {
   `;
 
   detailOverlay.classList.remove('hidden');
+
+  if (card.hasPhoto) {
+    loadAvatarPhoto(detailContent.querySelector('.detail-avatar'), card);
+  }
 }
 
 function closeDetail() {
@@ -329,10 +505,16 @@ btnDetailEdit.addEventListener('click', () => {
   openEditModal(card);
 });
 
-btnDetailDelete.addEventListener('click', () => {
+btnDetailDelete.addEventListener('click', async () => {
   if (!currentDetailId) return;
   const card = cards.find((c) => c.id === currentDetailId);
   if (!confirm(`「${card?.name}」を削除しますか？`)) return;
+
+  if (card.hasPhoto) {
+    try { await deletePhotoDB(currentDetailId); } catch { /* ignore */ }
+    revokePhotoUrl(currentDetailId);
+  }
+
   cards = cards.filter((c) => c.id !== currentDetailId);
   saveCards(cards);
   renderList();
@@ -363,6 +545,19 @@ btnSearchToggle.addEventListener('click', () => {
 searchInput.addEventListener('input', () => {
   searchQuery = searchInput.value.trim();
   renderList();
+});
+
+// ===== Dark Mode Toggle =====
+btnTheme.addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+});
+
+// Follow system preference changes when user hasn't manually chosen
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  if (!localStorage.getItem(THEME_KEY)) {
+    applyTheme(e.matches ? 'dark' : 'light');
+  }
 });
 
 // ===== Event Bindings =====
@@ -406,4 +601,11 @@ if ('serviceWorker' in navigator) {
 }
 
 // ===== Init =====
-renderList();
+async function init() {
+  renderList(); // Render immediately (initials only, no photos yet)
+  await openDB();
+  await migratePhotos(); // Migrate any legacy base64 photos
+  renderList();           // Re-render so async photo loading kicks in
+}
+
+init();
