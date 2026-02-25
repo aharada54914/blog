@@ -1,10 +1,14 @@
-const CACHE_NAME = 'meishi-v1';
+const CACHE_NAME = 'meishi-v2';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
   './manifest.json',
+  './lib/vcard.js',
+  './lib/export-import.js',
+  './lib/qr.js',
+  './lib/qrcode.min.js',
 ];
 
 // Install: pre-cache app shell

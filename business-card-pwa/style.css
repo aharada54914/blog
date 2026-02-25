@@ -530,6 +530,101 @@ input.invalid:focus { box-shadow: 0 0 0 3px var(--danger-light); }
   .toast { bottom: 24px; }
 }
 
+/* ===== Action Menu (dropdown) ===== */
+.action-menu {
+  position: fixed;
+  right: 12px;
+  z-index: 150;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+  min-width: 210px;
+  overflow: hidden;
+  animation: slide-up 150ms ease;
+}
+
+.menu-section-label {
+  padding: 8px 16px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-hint);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 16px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: transparent;
+  transition: background var(--transition);
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+.menu-item svg { flex-shrink: 0; color: var(--text-secondary); }
+.menu-item:hover { background: var(--surface-2); }
+
+.menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* ===== QR Modal ===== */
+.qr-modal {
+  max-width: 320px;
+}
+
+.qr-content {
+  padding: 8px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.qr-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.qr-canvas-wrap {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  line-height: 0;
+  background: #fff; /* QR always on white bg */
+  padding: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.qr-canvas-wrap canvas {
+  display: block;
+}
+
+.qr-loading,
+.qr-error {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 20px;
+  text-align: center;
+}
+
+.qr-hint {
+  font-size: 13px;
+  color: var(--text-hint);
+  text-align: center;
+}
+
 /* ===== Scrollbar ===== */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -1,0 +1,9 @@
+# Override parent .gitignore:
+# lib/ here is application source code, not Python packages
+!lib/
+
+# Exclude npm artifacts
+node_modules/
+
+# Exclude test coverage output
+coverage/

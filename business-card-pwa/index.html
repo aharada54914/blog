@@ -25,11 +25,9 @@
           </svg>
         </button>
         <button id="btn-theme" class="icon-btn" aria-label="ダークモードに切り替え">
-          <!-- Moon: shown in light mode -->
           <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
           </svg>
-          <!-- Sun: shown in dark mode -->
           <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="5"/>
             <line x1="12" y1="1" x2="12" y2="3"/>
@@ -40,6 +38,14 @@
             <line x1="21" y1="12" x2="23" y2="12"/>
             <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
             <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+        </button>
+        <!-- Menu button (export / import) -->
+        <button id="btn-menu" class="icon-btn" aria-label="メニュー" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="5" r="1" fill="currentColor"/>
+            <circle cx="12" cy="12" r="1" fill="currentColor"/>
+            <circle cx="12" cy="19" r="1" fill="currentColor"/>
           </svg>
         </button>
         <button id="btn-add" class="icon-btn primary" aria-label="名刺を追加">
@@ -63,16 +69,57 @@
     </div>
   </header>
 
+  <!-- Action menu (dropdown) -->
+  <div id="action-menu" class="action-menu hidden" role="menu">
+    <div class="menu-section-label">エクスポート</div>
+    <button class="menu-item" id="menu-export-json" role="menuitem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      JSONでエクスポート
+    </button>
+    <button class="menu-item" id="menu-export-csv" role="menuitem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      CSVでエクスポート
+    </button>
+    <button class="menu-item" id="menu-export-vcard" role="menuitem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      vCardでエクスポート（全件）
+    </button>
+    <div class="menu-divider"></div>
+    <div class="menu-section-label">インポート</div>
+    <button class="menu-item" id="menu-import-json" role="menuitem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 5 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      JSONをインポート
+    </button>
+    <button class="menu-item" id="menu-import-csv" role="menuitem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 5 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      CSVをインポート
+    </button>
+  </div>
+  <!-- Hidden file input for import -->
+  <input type="file" id="import-file" class="visually-hidden" accept=".json,.csv" />
+
   <!-- Main content -->
   <main class="main">
-    <!-- Empty state -->
     <div id="empty-state" class="empty-state hidden">
       <div class="empty-icon">📭</div>
       <p class="empty-title">名刺がありません</p>
       <p class="empty-sub">右上の＋ボタンで名刺を追加しましょう</p>
     </div>
-
-    <!-- Card list -->
     <ul id="card-list" class="card-list" role="list"></ul>
   </main>
 
@@ -94,11 +141,8 @@
           </svg>
         </button>
       </div>
-
       <form id="card-form" novalidate>
         <input type="hidden" id="form-id" />
-
-        <!-- Photo -->
         <div class="form-photo-area">
           <div id="photo-preview" class="photo-preview">
             <span class="photo-placeholder">👤</span>
@@ -106,7 +150,6 @@
           <label for="form-photo" class="photo-label">写真を選択</label>
           <input id="form-photo" type="file" accept="image/*" capture="environment" class="visually-hidden" />
         </div>
-
         <div class="form-grid">
           <div class="form-group full">
             <label for="form-name">氏名 <span class="required">*</span></label>
@@ -158,7 +201,6 @@
             <textarea id="form-notes" placeholder="備考・メモ..." rows="3"></textarea>
           </div>
         </div>
-
         <div class="form-actions">
           <button type="button" id="btn-cancel" class="btn btn-ghost">キャンセル</button>
           <button type="submit" class="btn btn-primary">保存</button>
@@ -180,6 +222,16 @@
       </div>
       <div id="detail-content" class="detail-content"></div>
       <div class="detail-actions">
+        <button id="btn-detail-qr" class="btn btn-outline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+            <rect x="5" y="5" width="3" height="3"/><rect x="16" y="5" width="3" height="3"/>
+            <rect x="5" y="16" width="3" height="3"/>
+            <path d="M14 14h3v3h-3z"/><path d="M17 17h3v3h-3z"/><path d="M14 17h0"/><path d="M17 14h0"/>
+          </svg>
+          QR
+        </button>
         <button id="btn-detail-edit" class="btn btn-outline">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -199,9 +251,30 @@
     </div>
   </div>
 
+  <!-- Modal: QR Code -->
+  <div id="qr-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="qr-title">
+    <div class="modal qr-modal">
+      <div class="modal-header">
+        <h2 id="qr-title">QRコード</h2>
+        <button id="btn-qr-close" class="icon-btn" aria-label="閉じる">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="qr-content">
+        <p class="qr-name" id="qr-name"></p>
+        <div id="qr-canvas-wrap" class="qr-canvas-wrap"></div>
+        <p class="qr-hint">スキャンして連絡先に追加</p>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js"></script>
+  <!-- QRCode library (vendored) -->
+  <script src="lib/qrcode.min.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,4 +1,6 @@
-'use strict';
+import { cardToVCard, cardsToVCards } from './lib/vcard.js';
+import { exportJSON, exportCSV, parseImportJSON, parseImportCSV } from './lib/export-import.js';
+import { renderQR } from './lib/qr.js';
 
 // ===== Dark Mode (apply immediately to prevent FOUC) =====
 const THEME_KEY = 'meishi_theme';
@@ -64,7 +66,6 @@ function deletePhotoDB(id) {
 }
 
 // ===== Photo URL Cache =====
-// Map<cardId, objectURL> — persists across re-renders
 const photoUrlCache = new Map();
 
 function revokePhotoUrl(id) {
@@ -113,7 +114,7 @@ async function migratePhotos() {
         delete card.photo;
         changed = true;
       } catch {
-        // Migration failed for this card; leave as-is
+        // Leave as-is on failure
       }
     }
   }
@@ -124,7 +125,7 @@ async function migratePhotos() {
 let cards = loadCards();
 let searchQuery = '';
 let currentDetailId = null;
-let sortBy = 'createdAt'; // 'createdAt' | 'name' | 'company'
+let sortBy = 'createdAt';
 
 // ===== DOM refs =====
 const $ = (id) => document.getElementById(id);
@@ -135,12 +136,17 @@ const emptyState = $('empty-state');
 const btnAdd          = $('btn-add');
 const btnSearchToggle = $('btn-search-toggle');
 const btnTheme        = $('btn-theme');
+const btnMenu         = $('btn-menu');
 const searchBar       = $('search-bar');
 const searchInput     = $('search-input');
 const fab             = $('fab');
 
 // Sort chips
 const sortChips = document.querySelectorAll('.sort-chip');
+
+// Action menu
+const actionMenu = $('action-menu');
+const importFile = $('import-file');
 
 // Add/Edit modal
 const modalOverlay  = $('modal-overlay');
@@ -157,6 +163,13 @@ const detailContent   = $('detail-content');
 const btnDetailClose  = $('btn-detail-close');
 const btnDetailEdit   = $('btn-detail-edit');
 const btnDetailDelete = $('btn-detail-delete');
+const btnDetailQr     = $('btn-detail-qr');
+
+// QR modal
+const qrOverlay     = $('qr-overlay');
+const qrCanvasWrap  = $('qr-canvas-wrap');
+const qrName        = $('qr-name');
+const btnQrClose    = $('btn-qr-close');
 
 // Toast
 const toast = $('toast');
@@ -178,7 +191,6 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// Render avatar with initials; photo is loaded async separately
 function renderAvatarHtml(card, cls) {
   return `<div class="${cls}" data-id="${escHtml(card.id)}">${escHtml(getInitials(card.name))}</div>`;
 }
@@ -190,7 +202,7 @@ async function loadAvatarPhoto(el, card) {
     if (!url || !el.isConnected) return;
     el.innerHTML = `<img src="${url}" alt="${escHtml(card.name)}" />`;
   } catch {
-    // Silently fail — initials remain
+    // Initials remain
   }
 }
 
@@ -217,9 +229,7 @@ function renderCardItem(card) {
     </div>
   `;
 
-  if (card.hasPhoto) {
-    loadAvatarPhoto(li.querySelector('.card-avatar'), card);
-  }
+  if (card.hasPhoto) loadAvatarPhoto(li.querySelector('.card-avatar'), card);
 
   li.addEventListener('click', () => openDetail(card.id));
   li.addEventListener('keydown', (e) => {
@@ -255,7 +265,6 @@ function sortedCards(list) {
       (a.company || '').localeCompare(b.company || '', 'ja')
     );
   }
-  // createdAt: newest first
   return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
 
@@ -330,16 +339,13 @@ async function openEditModal(card) {
   modalOverlay.classList.remove('hidden');
   setTimeout(() => $('form-name').focus(), 50);
 
-  // Load existing photo asynchronously
   if (card.hasPhoto) {
     try {
       const url = await getPhotoUrl(card.id);
-      if (url && modalOverlay.classList.contains('hidden') === false) {
+      if (url && !modalOverlay.classList.contains('hidden')) {
         photoPreview.innerHTML = `<img src="${url}" alt="写真" />`;
       }
-    } catch {
-      // Leave placeholder
-    }
+    } catch { /* leave placeholder */ }
   }
 }
 
@@ -395,20 +401,18 @@ cardForm.addEventListener('submit', async (e) => {
   const id = $('form-id').value;
 
   if (id) {
-    // Edit
     const idx = cards.findIndex((c) => c.id === id);
     if (idx !== -1) {
       let hasPhoto = cards[idx].hasPhoto || false;
       if (pendingPhotoBlob) {
         await savePhotoDB(id, pendingPhotoBlob);
-        revokePhotoUrl(id); // Invalidate cached URL
+        revokePhotoUrl(id);
         hasPhoto = true;
       }
       cards[idx] = { ...cards[idx], ...data, hasPhoto, updatedAt: new Date().toISOString() };
     }
     showToast('名刺を更新しました');
   } else {
-    // Add
     const newId = generateId();
     let hasPhoto = false;
     if (pendingPhotoBlob) {
@@ -424,7 +428,6 @@ cardForm.addEventListener('submit', async (e) => {
   closeAddModal();
 });
 
-// Photo picker
 formPhoto.addEventListener('change', () => {
   const file = formPhoto.files[0];
   if (!file) return;
@@ -522,6 +525,27 @@ btnDetailDelete.addEventListener('click', async () => {
   showToast('名刺を削除しました');
 });
 
+// ===== QR Modal =====
+btnDetailQr.addEventListener('click', async () => {
+  const card = cards.find((c) => c.id === currentDetailId);
+  if (!card) return;
+
+  qrName.textContent = card.name;
+  qrCanvasWrap.innerHTML = '<div class="qr-loading">生成中...</div>';
+  qrOverlay.classList.remove('hidden');
+
+  try {
+    await renderQR(qrCanvasWrap, cardToVCard(card));
+  } catch {
+    qrCanvasWrap.innerHTML = '<p class="qr-error">QRコードの生成に失敗しました</p>';
+  }
+});
+
+btnQrClose.addEventListener('click', () => qrOverlay.classList.add('hidden'));
+qrOverlay.addEventListener('click', (e) => {
+  if (e.target === qrOverlay) qrOverlay.classList.add('hidden');
+});
+
 // ===== Toast =====
 function showToast(msg) {
   clearTimeout(toastTimer);
@@ -529,6 +553,116 @@ function showToast(msg) {
   toast.classList.add('show');
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2500);
 }
+
+// ===== Action Menu =====
+function closeMenu() {
+  actionMenu.classList.add('hidden');
+  btnMenu.setAttribute('aria-expanded', 'false');
+}
+
+btnMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const isOpen = !actionMenu.classList.contains('hidden');
+  if (isOpen) {
+    closeMenu();
+  } else {
+    // Position below entire header
+    const headerBottom = document.querySelector('.header').getBoundingClientRect().bottom;
+    actionMenu.style.top = `${headerBottom + 4}px`;
+    actionMenu.classList.remove('hidden');
+    btnMenu.setAttribute('aria-expanded', 'true');
+  }
+});
+
+document.addEventListener('click', closeMenu);
+actionMenu.addEventListener('click', (e) => e.stopPropagation());
+
+// ===== File download helper =====
+function downloadFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ===== Export =====
+$('menu-export-json').addEventListener('click', () => {
+  downloadFile('meishi-export.json', exportJSON(cards), 'application/json');
+  closeMenu();
+});
+
+$('menu-export-csv').addEventListener('click', () => {
+  downloadFile('meishi-export.csv', exportCSV(cards), 'text/csv;charset=utf-8;');
+  closeMenu();
+});
+
+$('menu-export-vcard').addEventListener('click', () => {
+  downloadFile('meishi-export.vcf', cardsToVCards(cards), 'text/vcard;charset=utf-8;');
+  closeMenu();
+});
+
+// ===== Import =====
+let importMode = null; // 'json' | 'csv'
+
+$('menu-import-json').addEventListener('click', () => {
+  importMode = 'json';
+  importFile.accept = '.json,application/json';
+  importFile.click();
+  closeMenu();
+});
+
+$('menu-import-csv').addEventListener('click', () => {
+  importMode = 'csv';
+  importFile.accept = '.csv,text/csv';
+  importFile.click();
+  closeMenu();
+});
+
+importFile.addEventListener('change', async () => {
+  const file = importFile.files[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const imported = importMode === 'json'
+      ? parseImportJSON(text)
+      : parseImportCSV(text);
+
+    if (imported.length === 0) {
+      showToast('インポートできるデータがありませんでした');
+      return;
+    }
+
+    let added = 0;
+    let updated = 0;
+
+    for (const newCard of imported) {
+      const idx = cards.findIndex((c) => c.id === newCard.id);
+      if (idx !== -1) {
+        cards[idx] = { ...cards[idx], ...newCard };
+        updated++;
+      } else {
+        cards.push(newCard);
+        added++;
+      }
+    }
+
+    saveCards(cards);
+    renderList();
+
+    const parts = [];
+    if (added)   parts.push(`${added}件追加`);
+    if (updated) parts.push(`${updated}件更新`);
+    showToast(parts.join('、') + 'しました');
+  } catch (err) {
+    showToast('インポート失敗: ' + (err.message || '不明なエラー'));
+  }
+
+  importFile.value = '';
+});
 
 // ===== Search =====
 btnSearchToggle.addEventListener('click', () => {
@@ -553,7 +687,6 @@ btnTheme.addEventListener('click', () => {
   applyTheme(current === 'dark' ? 'light' : 'dark');
 });
 
-// Follow system preference changes when user hasn't manually chosen
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
   if (!localStorage.getItem(THEME_KEY)) {
     applyTheme(e.matches ? 'dark' : 'light');
@@ -567,7 +700,6 @@ btnModalClose.addEventListener('click', closeAddModal);
 btnCancel.addEventListener('click', closeAddModal);
 btnDetailClose.addEventListener('click', closeDetail);
 
-// Close on backdrop click
 modalOverlay.addEventListener('click', (e) => {
   if (e.target === modalOverlay) closeAddModal();
 });
@@ -575,12 +707,13 @@ detailOverlay.addEventListener('click', (e) => {
   if (e.target === detailOverlay) closeDetail();
 });
 
-// ESC key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!modalOverlay.classList.contains('hidden')) closeAddModal();
-    else if (!detailOverlay.classList.contains('hidden')) closeDetail();
-    else if (!searchBar.classList.contains('hidden')) {
+    if (!qrOverlay.classList.contains('hidden'))      { qrOverlay.classList.add('hidden'); return; }
+    if (!modalOverlay.classList.contains('hidden'))   { closeAddModal(); return; }
+    if (!detailOverlay.classList.contains('hidden'))  { closeDetail(); return; }
+    if (!actionMenu.classList.contains('hidden'))     { closeMenu(); return; }
+    if (!searchBar.classList.contains('hidden')) {
       searchBar.classList.add('hidden');
       searchQuery = '';
       searchInput.value = '';
@@ -589,7 +722,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Handle ?action=add from manifest shortcut
 if (new URLSearchParams(location.search).get('action') === 'add') {
   history.replaceState({}, '', location.pathname);
   openAddModal();
@@ -602,10 +734,10 @@ if ('serviceWorker' in navigator) {
 
 // ===== Init =====
 async function init() {
-  renderList(); // Render immediately (initials only, no photos yet)
+  renderList();
   await openDB();
-  await migratePhotos(); // Migrate any legacy base64 photos
-  renderList();           // Re-render so async photo loading kicks in
+  await migratePhotos();
+  renderList();
 }
 
 init();
