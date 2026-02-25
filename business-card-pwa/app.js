@@ -1,6 +1,8 @@
 import { cardToVCard, cardsToVCards } from './lib/vcard.js';
 import { exportJSON, exportCSV, parseImportJSON, parseImportCSV } from './lib/export-import.js';
 import { renderQR } from './lib/qr.js';
+import { recognizeImage } from './lib/ocr.js';
+import { parseOCRText } from './lib/field-parser.js';
 
 // ===== Dark Mode (apply immediately to prevent FOUC) =====
 const THEME_KEY = 'meishi_theme';
@@ -147,6 +149,11 @@ const sortChips = document.querySelectorAll('.sort-chip');
 // Action menu
 const actionMenu = $('action-menu');
 const importFile = $('import-file');
+
+// Scan
+const btnScan   = $('btn-scan');
+const scanPhoto = $('scan-photo');
+const scanHint  = $('scan-hint');
 
 // Add/Edit modal
 const modalOverlay  = $('modal-overlay');
@@ -437,6 +444,76 @@ formPhoto.addEventListener('change', () => {
   photoPreview.innerHTML = `<img src="${pendingPhotoPreviewUrl}" alt="写真" />`;
 });
 photoPreview.addEventListener('click', () => formPhoto.click());
+
+// ===== Scan (OCR) =====
+let isScanning = false;
+
+function setFormDisabled(disabled) {
+  cardForm.querySelectorAll('input, textarea, select').forEach(el => {
+    el.disabled = disabled;
+  });
+  cardForm.querySelector('button[type="submit"]').disabled = disabled;
+  btnScan.disabled = disabled;
+}
+
+function fillFormFromOCR(fields) {
+  if (fields.company)  $('form-company').value  = fields.company;
+  if (fields.position) $('form-position').value = fields.position;
+  if (fields.email)    $('form-email').value    = fields.email;
+  if (fields.phone)    $('form-phone').value    = fields.phone;
+  if (fields.mobile)   $('form-mobile').value   = fields.mobile;
+  if (fields.address)  $('form-address').value  = fields.address;
+  if (fields.website)  $('form-website').value  = fields.website;
+}
+
+btnScan.addEventListener('click', () => {
+  if (isScanning) return;
+  scanPhoto.click();
+});
+
+scanPhoto.addEventListener('change', async () => {
+  const file = scanPhoto.files[0];
+  if (!file) return;
+
+  // Use the scanned image as the avatar photo too
+  clearPendingPhoto();
+  pendingPhotoBlob = file;
+  pendingPhotoPreviewUrl = URL.createObjectURL(file);
+
+  isScanning = true;
+  setFormDisabled(true);
+  scanHint.classList.add('hidden');
+
+  // Show spinner in preview
+  photoPreview.innerHTML = `
+    <div class="scan-progress">
+      <div class="scan-spinner"></div>
+      <span class="scan-pct">0%</span>
+    </div>`;
+
+  try {
+    const rawText = await recognizeImage(file, (pct) => {
+      const el = photoPreview.querySelector('.scan-pct');
+      if (el) el.textContent = `${pct}%`;
+    });
+
+    // Restore photo preview
+    photoPreview.innerHTML = `<img src="${pendingPhotoPreviewUrl}" alt="写真" />`;
+
+    const fields = parseOCRText(rawText);
+    fillFormFromOCR(fields);
+    scanHint.classList.remove('hidden');
+    showToast('解析完了。内容を確認・修正してください');
+  } catch (err) {
+    photoPreview.innerHTML = '<span class="photo-placeholder">👤</span>';
+    clearPendingPhoto();
+    showToast('スキャンに失敗しました: ' + (err.message || '不明なエラー'));
+  } finally {
+    isScanning = false;
+    setFormDisabled(false);
+    scanPhoto.value = '';
+  }
+});
 
 // ===== Detail Modal =====
 function detailField(icon, label, value, link = null) {
